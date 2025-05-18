@@ -22,13 +22,11 @@ Dukungan dan kontribusi dari komunitas sangat diapresiasi! 💖
 ✅ **Kirim & terima pesan** dalam berbagai format  
 ✅ **Mengelola grup** (buat grup, tambahkan/kick anggota, atur deskripsi, dll.)  
 ✅ **Integrasi event** seperti masuk/keluar grup, pesan diterima, pesan terbaca  
-✅ **Mendukung TypeScript** untuk pengembangan yang lebih aman  
-
 ---
 
 ## 📦 Instalasi
 
-Pastikan **Node.js ≥ 14.0** sudah terpasang,
+Pastikan **Node.js ≥ 14.0++** sudah terpasang,
 Kemudian jalankan perintah berikut di terminal:
 
 ```sh
@@ -43,39 +41,64 @@ yarn add @kagenoureal/baileys
 
 ---
 
-## 🚀 Penggunaan Dasar
+## 🚀 Penggunaan Dasar pairing code
 
 ```javascript
-import makeWASocket, { DisconnectReason } from '@kagenouReal/baileys'
-import { Boom } from '@hapi/boom'
+const { useMultiFileAuthState, makeWASocket } = require('@kagenouReal/baileys');
+const readline = require('readline');
 
-async function connectToWhatsApp () {
-    const sock = makeWASocket({
-        // can provide additional config here
-        printQRInTerminal: true
-    })
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update
-        if(connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut
-            console.log('connection closed due to ', lastDisconnect.error, ', reconnecting ', shouldReconnect)
-            // reconnect if not logged out
-            if(shouldReconnect) {
-                connectToWhatsApp()
-            }
-        } else if(connection === 'open') {
-            console.log('opened connection')
-        }
-    })
-    sock.ev.on('messages.upsert', m => {
-        console.log(JSON.stringify(m, undefined, 2))
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const question = (q) => new Promise(res => rl.question(q, res));
 
-        console.log('replying to', m.messages[0].key.remoteJid)
-        await sock.sendMessage(m.messages[0].key.remoteJid!, { text: 'Hello there!' })
-    })
+async function start() {
+  const { state, saveCreds } = await useMultiFileAuthState('./session');
+  const usePairingCode = true;
+
+  const conn = makeWASocket({
+    auth: state,
+    printQRInTerminal: !usePairingCode,
+    keepAliveIntervalMs: 50000,
+  });
+
+  conn.ev.on('creds.update', saveCreds);
+
+  if (usePairingCode && !conn.authState.creds.registered) {
+    const phone = (await question('Enter Your Number Phone:\n')).replace(/\D/g, '');
+    rl.close();
+    try {
+      const code = await conn.requestPairingCode(phone);
+      console.log('Code Whatsapp:', code.match(/.{1,4}/g).join('-'));
+    } catch (e) {
+      console.log('Failed to get pairing code:', e.message);
+    }
+  }
+
+  conn.ev.on('connection.update', ({ connection, lastDisconnect }) => {
+    if (connection === 'close') {
+      const reason = lastDisconnect?.error?.output?.statusCode || 'Unknown';
+      console.log('Connection closed:', reason);
+      if ([401, 405].includes(reason)) {
+        console.log('Logged out, delete session folder to relogin');
+      } else if ([515, 428].includes(reason)) {
+        console.log('Restarting...');
+        start();
+      }
+    } else if (connection === 'open') {
+      console.log('Whatsapp connected');
+    }
+  });
+
+  conn.ev.on('messages.upsert', async (m) => {
+    if (m.type === 'notify') {
+      const msg = m.messages[0];
+      if (!msg.key.fromMe && msg.message) {
+        await conn.sendMessage(msg.key.remoteJid, { text: 'Hello there!' });
+      }
+    }
+  });
 }
-// run in main file
-connectToWhatsApp()
+
+start();
 ```
 
 ---
@@ -97,29 +120,11 @@ connectToWhatsApp()
 
 ### 🪀 Mengirim Semua Interaktif Msg  
 ```ts
-const { generateWAMessageFromContent, proto } = require("@kagenouReal/baileys")
-let msg = generateWAMessageFromContent(m.chat, {
- viewOnceMessage: {
-   message: {
-       "messageContextInfo": {
-         "deviceListMetadata": {},
-         "deviceListMetadataVersion": 2
-       },
-       interactiveMessage: proto.Message.InteractiveMessage.create({
-         body: proto.Message.InteractiveMessage.Body.create({
-           text: "Hello world"
-         }),
-         footer: proto.Message.InteractiveMessage.Footer.create({
-           text: "p"
-         }),
-         header: proto.Message.InteractiveMessage.Header.create({
-           title: "halo",
-           subtitle: "test",
-           hasMediaAttachment: false
-         }),
-         nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
-           buttons: [
-             {
+await sock.sendMessage(m.chat, {
+  text: "halo",
+  title: "tes",
+  footer: "© ᴋᴀɢᴇɴᴏᴜ - 2025",
+  interactiveButtons: [{
                "name": "single_select",
                "buttonParamsJson": "{\"title\":\"title\",\"sections\":[{\".menu\":\".play dj webito\",\"highlight_label\":\"label\",\"rows\":[{\"header\":\"header\",\"title\":\"title\",\"description\":\"description\",\"id\":\"id\"},{\"header\":\"header\",\"title\":\"title\",\"description\":\"description\",\"id\":\"id\"}]}]}"
              },
@@ -154,15 +159,8 @@ let msg = generateWAMessageFromContent(m.chat, {
              {
                 "name": "send_location",
                 "buttonParamsJson": ""
-             }
-          ],
-         })
-       })
-   }
- }
-}, {})
-
-return sock.relayMessage(msg.key.remoteJid, msg.message, { messageId: msg.key.id })>
+             }]
+}, { quoted: m });
 ```
 
 
@@ -283,4 +281,4 @@ Kami menyambut kontribusi dari siapa saja! Jika ingin membantu:
 
 ---
 
-🚀 **Semoga kamu suka & semangat ngoding!** 🎉
+🚀 **Semoga kamu suka & semangat ngoding!** �
